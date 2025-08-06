@@ -24,6 +24,10 @@ df = pd.read_csv(DATA_PATH, sep=';', decimal='.')
 if 'Earnings_USD_L' not in df.columns:
     df['Earnings_USD_L'] = np.log1p(df['Earnings_USD'])
 
+# Crear variable binaria de éxito (>80%)
+if 'Success_Binary' not in df.columns and 'Job_Success_Rate' in df.columns:
+    df['Success_Binary'] = (df['Job_Success_Rate'] >= 80).astype(int)
+
 print("\n===== Primeras filas =====\n", df.head())
 print("\n===== Información =====")
 print(df.info())
@@ -125,7 +129,9 @@ print("\n===== Resumen Regresión Lineal Múltiple =====")
 print(model_ols.summary())
 
 # Variables binarias disponibles
-binary_cols = [col for col in df.columns if df[col].nunique() == 2]
+binary_cols = ['Success_Binary'] if 'Success_Binary' in df.columns else []
+
+# Regresión logística simple
 if binary_cols:
     target = binary_cols[0]
     # Asegurar que la variable objetivo sea numérica 0/1
@@ -138,9 +144,26 @@ if binary_cols:
     print(logit_simple.summary())
 
     # Regresión logística múltiple usando num_cols
-    logit_mult = sm.Logit(df[target], sm.add_constant(df[num_cols])).fit(disp=False)
-    print("\n===== Regresión Logística Múltiple =====")
-    print(logit_mult.summary())
+    try:
+        logit_mult = sm.Logit(df[target], sm.add_constant(df[num_cols])).fit(disp=False)
+        print("\n===== Regresión Logística Múltiple =====")
+        print(logit_mult.summary())
+    except np.linalg.LinAlgError:
+        print("\nRegresión Logística Múltiple: problema de singularidad, se omite el resumen.")
+
+    # GLM logístico (alternativa)
+    try:
+        glm_logit = sm.GLM(df[target], sm.add_constant(df[num_cols]), family=sm.families.Binomial()).fit()
+        print("\n===== GLM Binomial =====")
+        print(glm_logit.summary())
+    except np.linalg.LinAlgError:
+        print("\nGLM Binomial: problema de singularidad, se omite el resumen.")
+
+# GLM Poisson para Job_Completed (conteo)
+if 'Job_Completed' in df.columns:
+    glm_poisson = sm.GLM(df['Job_Completed'], sm.add_constant(df[num_cols]), family=sm.families.Poisson()).fit()
+    print("\n===== GLM Poisson - Job_Completed =====")
+    print(glm_poisson.summary())
 
 # ------------------------------
 # Paso 5️⃣: Modelos Automáticos (Random Forest & GB) si hay variable binaria
@@ -168,5 +191,16 @@ try:
 
 except ImportError:
     print("sklearn.ensemble not available.")
+
+# ------------------------------
+# Resumen final de hallazgos
+# ------------------------------
+print("\n===== Resumen de Hallazgos =====")
+print("1. La varianza explicada por las 2 primeras componentes del PCA es: {:.2f}%".format(np.cumsum(explained_var)[1]*100))
+print("2. Regresión lineal múltiple R^2: {:.3f}".format(model_ols.rsquared))
+if binary_cols:
+    print("3. Accuracy Random Forest: {:.3f}, Gradient Boosting: {:.3f}".format(acc_rf, acc_gb))
+    print("4. La variable de éxito tiene una media de {:.2f}, indicando un {:.0f}% de freelancers exitosos.".format(df[target].mean(), df[target].mean()*100))
+print("Los gráficos se han guardado en la carpeta /workspace para su revisión.")
 
 print("\nAnálisis completado. Gráficos guardados en carpeta /workspace")
